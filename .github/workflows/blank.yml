@@ -51,7 +51,7 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Set up Gradle
+      - name: Set up Gradle (system gradle if wrapper missing)
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: 8.11.1
@@ -73,23 +73,32 @@ jobs:
               -dname "CN=Android Debug, OU=Android, O=Android, L=Unknown, ST=Unknown, C=US"
           fi
 
-      - name: Grant execute permission for Gradle wrapper
-        run: chmod +x gradlew
-
-      - name: Build release APK
+      - name: Build release APK (use wrapper if present, otherwise system gradle)
         shell: bash
         run: |
           set -euxo pipefail
           export ANDROID_SDK_ROOT="${ANDROID_SDK_ROOT:-/usr/local/lib/android/sdk}"
           export PATH="${ANDROID_SDK_ROOT}/cmdline-tools/latest/bin:${ANDROID_SDK_ROOT}/platform-tools:${PATH}"
-          ./gradlew clean assembleRelease --no-daemon --console=plain
+          if [ -f "./gradlew" ]; then
+            chmod +x ./gradlew || true
+            ./gradlew clean assembleRelease --no-daemon --console=plain
+          else
+            echo "Gradle wrapper not found — using system gradle provided by setup-gradle"
+            gradle clean assembleRelease --no-daemon --console=plain
+          fi
 
       - name: Rename APK
         shell: bash
         run: |
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          cp app/build/outputs/apk/release/app-release.apk "ExpressiveFiles-v$VERSION.apk"
+          cp app/build/outputs/apk/release/app-release.apk "ExpressiveFiles-v$VERSION.apk" || true
+          # If release apk path differs, list outputs for debugging
+          if [ ! -f "ExpressiveFiles-v$VERSION.apk" ]; then
+            echo "Looking for APKs in app/build/outputs/apk/release:"
+            ls -la app/build/outputs/apk/release || true
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
